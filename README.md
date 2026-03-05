@@ -23,6 +23,18 @@ yarn add react-rerender-hook
 pnpm add react-rerender-hook
 ```
 
+### Install from Git
+
+Since this package is configured with a `prepare` script, you can also install it directly from GitHub:
+
+```bash
+npm install https://github.com/woodsboe/ReactRerenderHook
+# or
+yarn add https://github.com/woodsboe/ReactRerenderHook
+# or
+pnpm add https://github.com/woodsboe/ReactRerenderHook
+```
+
 ## Usage
 
 ### `useAdvancedRenderTracker`
