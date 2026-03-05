@@ -28,7 +28,7 @@ pnpm add react-rerender-hook
 Since this package is configured with a `prepare` script, you can also install it directly from GitHub:
 
 ```bash
-npm install https://github.com/woodsboe/ReactRerenderHook
+npm install -D https://github.com/woodsboe/ReactRerenderHook
 # or
 yarn add https://github.com/woodsboe/ReactRerenderHook
 # or
