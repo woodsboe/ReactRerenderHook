@@ -11,6 +11,18 @@ A powerful React hook and overlay component to track, debug, and visualize compo
 - 📊 **Visual Overlay**: An interactive, draggable, and resizable overlay to inspect render history.
 - 🪵 **Console Logging**: Detailed, grouped console logs with tables of changes.
 
+## Installation
+
+Install the package via your favorite package manager:
+
+```bash
+npm install react-rerender-hook
+# or
+yarn add react-rerender-hook
+# or
+pnpm add react-rerender-hook
+```
+
 ## Usage
 
 ### `useAdvancedRenderTracker`
@@ -18,7 +30,7 @@ A powerful React hook and overlay component to track, debug, and visualize compo
 Add the hook to your component to start tracking renders.
 
 ```tsx
-import { useAdvancedRenderTracker } from './rerender-hook/AdvancedRenderTrackerHook';
+import { useAdvancedRenderTracker } from 'react-rerender-hook';
 
 const MyComponent = (props) => {
   const { renderHistory } = useAdvancedRenderTracker('MyComponent', props, {
@@ -40,8 +52,7 @@ To see the render history in a visual overlay, use the `AdvancedRenderTrackerOve
 
 ```tsx
 import React, { useState } from 'react';
-import { useAdvancedRenderTracker } from './rerender-hook/AdvancedRenderTrackerHook';
-import { AdvancedRenderTrackerOverlay } from './rerender-hook/AdvancedRenderTrackerOverlay';
+import { useAdvancedRenderTracker, AdvancedRenderTrackerOverlay } from 'react-rerender-hook';
 
 const DebuggableComponent = (props) => {
   const [showOverlay, setShowOverlay] = useState(true);

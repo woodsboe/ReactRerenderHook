@@ -43,7 +43,7 @@ const safeStringify = (obj: any, maxDepth = 3, currentDepth = 0): string => {
     try {
         return JSON.stringify(obj, replacer, 2);
     } catch (error) {
-        return `[Serialization Error: ${error.message}]`;
+        return `[Serialization Error: ${error instanceof Error ? error.message : String(error)}]`;
     }
 };
 
