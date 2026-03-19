@@ -1,6 +1,19 @@
 import React, { useRef, useState, useEffect } from "react";
 
-// Safe JSON stringify that handles circular references
+// Fix #14: Move buttonStyle above component so constants precede their consumers
+const buttonStyle: React.CSSProperties = {
+    background: "#282850",
+    color: "#aef",
+    border: "1px solid #40407a",
+    borderRadius: 5,
+    padding: "4px 10px",
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: "pointer",
+    marginRight: 3,
+};
+
+// Fix #4: safeStringify now properly passes and increments currentDepth during recursion
 const safeStringify = (obj: any, maxDepth = 3, currentDepth = 0): string => {
     if (currentDepth > maxDepth) {
         return "[Max Depth Reached]";
@@ -8,7 +21,7 @@ const safeStringify = (obj: any, maxDepth = 3, currentDepth = 0): string => {
 
     const seen = new WeakSet();
 
-    const replacer = (key: string, value: any): any => {
+    const replacer = (_key: string, value: any): any => {
         // Handle circular references
         if (typeof value === "object" && value !== null) {
             if (seen.has(value)) {
@@ -23,7 +36,7 @@ const safeStringify = (obj: any, maxDepth = 3, currentDepth = 0): string => {
         }
 
         // Handle DOM elements
-        if (value instanceof Element) {
+        if (typeof Element !== "undefined" && value instanceof Element) {
             return `[DOM Element: ${value.tagName.toLowerCase()}]`;
         }
 
@@ -32,9 +45,17 @@ const safeStringify = (obj: any, maxDepth = 3, currentDepth = 0): string => {
             return `[Function: ${value.name || "anonymous"}]`;
         }
 
-        // Handle other complex objects at max depth
-        if (currentDepth >= maxDepth && typeof value === "object" && value !== null) {
-            return "[Complex Object]";
+        // Handle nested objects beyond max depth by recursing with incremented depth
+        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+            if (currentDepth >= maxDepth) {
+                return "[Complex Object]";
+            }
+            // Recurse with incremented depth for nested objects
+            try {
+                return JSON.parse(safeStringify(value, maxDepth, currentDepth + 1));
+            } catch {
+                return "[Complex Object]";
+            }
         }
 
         return value;
@@ -47,8 +68,8 @@ const safeStringify = (obj: any, maxDepth = 3, currentDepth = 0): string => {
     }
 };
 
-// Enhanced utility to help with safe value display
-const formatValue = (val: any) => {
+// Fix #15: Return type is React.ReactNode (string | JSX.Element)
+const formatValue = (val: any): React.ReactNode => {
     if (val === null) return "null";
     if (val === undefined) return "undefined";
     if (typeof val === "string") return `"${val}"`;
@@ -80,7 +101,7 @@ const formatValue = (val: any) => {
     return String(val);
 };
 
-// Resizable overlay hook
+// Fix #12: Remove unreachable 'left' and 'top' directions — no handles exist for them
 const useResizable = (initialSize = { width: 480, height: 400 }) => {
     const [size, setSize] = useState(initialSize);
     const [resizing, setResizing] = useState<string | null>(null);
@@ -96,17 +117,11 @@ const useResizable = (initialSize = { width: 480, height: 400 }) => {
             let newWidth = resizeStart.current.width;
             let newHeight = resizeStart.current.height;
 
-            if (resizing.includes('right')) {
+            if (resizing.includes("right")) {
                 newWidth = Math.max(320, Math.min(window.innerWidth * 0.9, resizeStart.current.width + deltaX));
             }
-            if (resizing.includes('left')) {
-                newWidth = Math.max(320, Math.min(window.innerWidth * 0.9, resizeStart.current.width - deltaX));
-            }
-            if (resizing.includes('bottom')) {
+            if (resizing.includes("bottom")) {
                 newHeight = Math.max(200, Math.min(window.innerHeight * 0.8, resizeStart.current.height + deltaY));
-            }
-            if (resizing.includes('top')) {
-                newHeight = Math.max(200, Math.min(window.innerHeight * 0.8, resizeStart.current.height - deltaY));
             }
 
             setSize({ width: newWidth, height: newHeight });
@@ -139,7 +154,7 @@ const useResizable = (initialSize = { width: 480, height: 400 }) => {
     return { size, startResize, resizing };
 };
 
-// Draggable overlay
+// Fix #11: Clamp drag position so the overlay can't be dragged off-screen
 const useDraggable = (initial = { x: 40, y: 40 }) => {
     const nodeRef = useRef<HTMLDivElement>(null);
     const [pos, setPos] = useState(initial);
@@ -148,11 +163,11 @@ const useDraggable = (initial = { x: 40, y: 40 }) => {
 
     useEffect(() => {
         const onMove = (e: MouseEvent) => {
-            if (!dragging) return;
-            setPos({
-                x: e.clientX - dragOffset.current.x,
-                y: e.clientY - dragOffset.current.y,
-            });
+            if (!dragging || !nodeRef.current) return;
+            const { offsetWidth, offsetHeight } = nodeRef.current;
+            const newX = Math.max(0, Math.min(window.innerWidth - offsetWidth, e.clientX - dragOffset.current.x));
+            const newY = Math.max(0, Math.min(window.innerHeight - offsetHeight, e.clientY - dragOffset.current.y));
+            setPos({ x: newX, y: newY });
         };
         const onUp = () => setDragging(false);
 
@@ -175,6 +190,8 @@ const useDraggable = (initial = { x: 40, y: 40 }) => {
 
     return { nodeRef, pos, onMouseDown };
 };
+
+const HEADER_HEIGHT = 45; // px — height of the fixed header
 
 export const AdvancedRenderTrackerOverlay = ({
     history,
@@ -203,6 +220,10 @@ export const AdvancedRenderTrackerOverlay = ({
     };
     const collapseAll = () => setExpandedRows({});
 
+    // Fix #13: Body height = total container height minus header height, so resizing
+    // the overlay actually expands the scrollable content area
+    const bodyHeight = collapsed ? 0 : size.height - HEADER_HEIGHT;
+
     return (
         <div
             ref={nodeRef}
@@ -212,7 +233,7 @@ export const AdvancedRenderTrackerOverlay = ({
                 top: pos.y,
                 zIndex: 99999,
                 width: size.width,
-                height: size.height,
+                height: collapsed ? HEADER_HEIGHT : size.height,
                 minWidth: 320,
                 maxWidth: "90vw",
                 maxHeight: "80vh",
@@ -232,6 +253,7 @@ export const AdvancedRenderTrackerOverlay = ({
             {/* Header */}
             <div
                 style={{
+                    height: HEADER_HEIGHT,
                     padding: "8px 12px",
                     background: "#232341",
                     borderBottom: "1px solid #282850",
@@ -240,6 +262,7 @@ export const AdvancedRenderTrackerOverlay = ({
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
+                    boxSizing: "border-box",
                 }}
                 onMouseDown={onMouseDown}
             >
@@ -280,14 +303,15 @@ export const AdvancedRenderTrackerOverlay = ({
                 </div>
             </div>
 
-            {/* Body */}
+            {/* Body — Fix #13: height tracks the resizable container */}
             {!collapsed && (
                 <div
                     style={{
-                        maxHeight: 400,
+                        height: bodyHeight,
                         overflow: "auto",
                         padding: 10,
                         background: "#202034",
+                        boxSizing: "border-box",
                     }}
                 >
                     <div style={{ marginBottom: 8, display: "flex", gap: 8 }}>
@@ -438,17 +462,17 @@ export const AdvancedRenderTrackerOverlay = ({
                 </div>
             )}
 
-            {/* Resize handles */}
-            {/* Bottom-right corner resize handle */}
+            {/* Resize handles — only bottom, right, and bottom-right corner */}
+            {/* Fix #3: Bottom-right corner uses nwse-resize (correct diagonal direction) */}
             <div
                 style={{
                     position: "absolute",
                     bottom: 0,
                     right: 0,
-                    width: 12,
-                    height: 12,
-                    cursor: "nw-resize",
-                    background: "linear-gradient(-45deg, transparent 30%, #666 30%, #666 70%, transparent 70%)",
+                    width: 14,
+                    height: 14,
+                    cursor: "nwse-resize",
+                    background: "linear-gradient(135deg, transparent 40%, #666 40%, #666 60%, transparent 60%)",
                     zIndex: 1,
                 }}
                 onMouseDown={startResize("bottom-right")}
@@ -461,7 +485,7 @@ export const AdvancedRenderTrackerOverlay = ({
                     position: "absolute",
                     top: 20,
                     right: 0,
-                    bottom: 12,
+                    bottom: 14,
                     width: 4,
                     cursor: "ew-resize",
                     background: "transparent",
@@ -477,7 +501,7 @@ export const AdvancedRenderTrackerOverlay = ({
                     position: "absolute",
                     bottom: 0,
                     left: 20,
-                    right: 12,
+                    right: 14,
                     height: 4,
                     cursor: "ns-resize",
                     background: "transparent",
@@ -488,16 +512,4 @@ export const AdvancedRenderTrackerOverlay = ({
             />
         </div>
     );
-};
-
-const buttonStyle: React.CSSProperties = {
-    background: "#282850",
-    color: "#aef",
-    border: "1px solid #40407a",
-    borderRadius: 5,
-    padding: "4px 10px",
-    fontWeight: 600,
-    fontSize: 13,
-    cursor: "pointer",
-    marginRight: 3,
 };

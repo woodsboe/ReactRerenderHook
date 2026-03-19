@@ -19,7 +19,7 @@ Provides a hook (`useAdvancedRenderTracker`) and visual overlay component (`Adva
 npm run build   # Production build (CJS + ESM, minified, with type defs)
 npm run dev     # Watch mode for development
 npm run lint    # TypeScript type checking (tsc --noEmit)
-npm run test    # Run tests (not yet configured — Vitest recommended)
+npm run test    # Run tests with Vitest
 ```
 
 ## Project Structure
@@ -67,9 +67,9 @@ function App() {
     <>
       <MyComponent />
       <AdvancedRenderTrackerOverlay
-        componentName="App"
-        renderHistory={tracker.renderHistory}
-        renderCount={tracker.renderCount}
+        name="App"
+        history={tracker.renderHistory}
+        onClose={() => console.log('closed')}
       />
     </>
   );
