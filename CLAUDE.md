@@ -9,7 +9,7 @@ Provides a hook (`useAdvancedRenderTracker`) and visual overlay component (`Adva
 ## Tech Stack
 
 - **Language:** TypeScript (strict mode, ESNext target)
-- **Framework:** React 18 (peer dependency)
+- **Framework:** React >=16.8.0 (peer dependency)
 - **Bundler:** tsup (esbuild-based)
 - **Output formats:** CommonJS, ESM, with `.d.ts` type definitions
 
@@ -19,6 +19,7 @@ Provides a hook (`useAdvancedRenderTracker`) and visual overlay component (`Adva
 npm run build   # Production build (CJS + ESM, minified, with type defs)
 npm run dev     # Watch mode for development
 npm run lint    # TypeScript type checking (tsc --noEmit)
+npm run test    # Run tests (not yet configured — Vitest recommended)
 ```
 
 ## Project Structure
@@ -43,9 +44,37 @@ Options:
 - `deepCompare` — use deep equality for change detection (default: `true`)
 - `maxHistory` — max render records to retain (default: `50`)
 
+```tsx
+function MyComponent({ value, label }: Props) {
+  const { renderCount, renderHistory } = useAdvancedRenderTracker(
+    'MyComponent',
+    { value, label },
+    { someHookDep },
+    { deepCompare: true, logToConsole: false }
+  );
+  return <div>{label}: {value}</div>;
+}
+```
+
 ### `AdvancedRenderTrackerOverlay`
 
 Interactive overlay component that displays render history. Draggable, resizable, collapsible.
+
+```tsx
+function App() {
+  const tracker = useAdvancedRenderTracker('App', props);
+  return (
+    <>
+      <MyComponent />
+      <AdvancedRenderTrackerOverlay
+        componentName="App"
+        renderHistory={tracker.renderHistory}
+        renderCount={tracker.renderCount}
+      />
+    </>
+  );
+}
+```
 
 ## Architecture Notes
 
