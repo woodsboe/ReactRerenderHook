@@ -325,11 +325,11 @@ export const AdvancedRenderTrackerOverlay = ({
                     {history.length === 0 && (
                         <div style={{ color: "#888", padding: 16 }}>No renders tracked yet.</div>
                     )}
-                    {history.map((entry) => {
+                    {history.map((entry, index) => {
                         const isExpanded = expandedRows[entry.renderNumber] || false;
                         return (
                             <div
-                                key={entry.renderNumber}
+                                key={`${entry.renderNumber}-${index}`}
                                 style={{
                                     marginBottom: 10,
                                     background: "#232341",
