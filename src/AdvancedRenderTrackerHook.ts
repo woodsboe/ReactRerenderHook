@@ -1,4 +1,4 @@
-import { useRef, useLayoutEffect } from "react";
+import { useRef, useEffect } from "react";
 
 // Enhanced deep equal utility with circular reference protection
 const deepEqual = (a: any, b: any, visited = new WeakMap()): boolean => {
@@ -32,28 +32,19 @@ const deepEqual = (a: any, b: any, visited = new WeakMap()): boolean => {
 type PropsType = Record<string, any>;
 type HookDependencies = Record<string, any>;
 
-export interface RenderRecord {
+interface RenderRecord {
     renderNumber: number;
     timestamp: number;
-    durationMs: number;
     propChanges: Record<string, { from: any; to: any }>;
     hookChanges: Record<string, { from: any; to: any }>;
 }
 
-export interface RenderTrackerOptions {
+interface RenderTrackerOptions {
     logToConsole?: boolean;
     trackHooks?: boolean;
     deepCompare?: boolean;
     maxHistory?: number;
-    slowRenderThresholdMs?: number;
 }
-
-let renderTrackerIdCounter = 0;
-
-const createRenderTrackerId = (name: string) => {
-    renderTrackerIdCounter += 1;
-    return `${name}-${renderTrackerIdCounter}`;
-};
 
 /**
  * Custom hook to track component re-renders with detailed prop and hook dependency changes.
@@ -75,23 +66,24 @@ export const useAdvancedRenderTracker = (
         // Fix #7: Align defaults with documentation (deepCompare: true, maxHistory: 50)
         deepCompare = true,
         maxHistory = 50,
-        slowRenderThresholdMs = 16.67, // Default to ~60fps threshold
     } = options;
 
-    const startTime = performance.now();
-
+    // Fix #1: Increment synchronously during render so the returned value is never stale.
+    // Using a ref (not state) avoids triggering a re-render loop — refs update without
+    // scheduling a new render, so the count reflects the current render immediately.
     const renderCountRef = useRef(0);
-    const currentRender = renderCountRef.current + 1;
+    renderCountRef.current += 1;
+    const currentRender = renderCountRef.current;
 
     const prevProps = useRef<PropsType>(props);
     const prevHookDeps = useRef<HookDependencies>(hookDependencies);
     const renderHistory = useRef<RenderRecord[]>([]);
-    const renderTracker = useOptionalRenderTrackerDispatch();
 
-    // Use layout effect to capture duration as close to the render commit as possible
-    useLayoutEffect(() => {
+    // This effect intentionally has no dependency array so it runs after every render,
+    // which is exactly what we need to capture every re-render regardless of cause.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => {
         renderCountRef.current = currentRender;
-        const durationMs = performance.now() - startTime;
         const timestamp = Date.now();
 
         const compareFn = deepCompare
@@ -145,26 +137,18 @@ export const useAdvancedRenderTracker = (
         renderHistory.current.push({
             renderNumber: currentRender,
             timestamp,
-            durationMs,
             propChanges,
             hookChanges,
         });
 
         // Keep only last N renders to avoid memory leaks
-        while (renderHistory.current.length > maxHistory) {
-            renderHistory.current.shift();
+        if (renderHistory.current.length > maxHistory) {
+            renderHistory.current = renderHistory.current.slice(-maxHistory);
         }
 
         // Console logging
         if (logToConsole && currentRender > 1) {
-            const isSlow = durationMs > slowRenderThresholdMs;
-            const label = `🔄 ${name} re-render #${currentRender} (${durationMs.toFixed(2)}ms)${isSlow ? " ⚠️ SLOW" : ""}`;
-            
-            if (isSlow) {
-                console.group(`%c${label}`, "color: #ff4d4d; font-weight: bold;");
-            } else {
-                console.group(label);
-            }
+            console.group(`🔄 ${name} re-render #${currentRender}`);
 
             if (Object.keys(propChanges).length > 0) {
                 console.log("📝 Props that changed:", propChanges);
@@ -182,17 +166,7 @@ export const useAdvancedRenderTracker = (
             console.log("📊 Current state:", { props, hookDependencies });
             console.groupEnd();
         } else if (logToConsole) {
-            console.log(`🚀 ${name} initial render (${durationMs.toFixed(2)}ms)`);
-        }
-
-        if (renderTracker && trackerIdRef.current) {
-            renderTracker.recordComponent({
-                id: trackerIdRef.current,
-                name,
-                renderCount: currentRender,
-                history: renderHistory.current,
-                updatedAt: timestamp,
-            });
+            console.log(`🚀 ${name} initial render`);
         }
 
         // Update refs
@@ -201,7 +175,7 @@ export const useAdvancedRenderTracker = (
     });
 
     return {
-        renderCount: currentRender,
+        renderCount: renderCountRef.current,
         renderHistory: renderHistory.current,
         getCurrentChanges: () => {
             const latest = renderHistory.current[renderHistory.current.length - 1];
