@@ -1,4 +1,6 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { RenderRecord } from "./AdvancedRenderTrackerHook";
+import { useOptionalRenderTrackerContext } from "./RenderTrackerContext";
 
 // Fix #14: Move buttonStyle above component so constants precede their consumers
 const buttonStyle: React.CSSProperties = {
@@ -193,30 +195,78 @@ const useDraggable = (initial = { x: 40, y: 40 }) => {
 
 const HEADER_HEIGHT = 45; // px — height of the fixed header
 
+interface AdvancedRenderTrackerOverlayProps {
+    history?: RenderRecord[];
+    name?: string;
+    onClose?: () => void;
+}
+
+interface OverlayComponentHistory {
+    id: string;
+    name: string;
+    renderCount: number;
+    history: RenderRecord[];
+}
+
 export const AdvancedRenderTrackerOverlay = ({
     history,
     name = "Component",
     onClose,
-}: {
-    history: Array<{
-        renderNumber: number;
-        timestamp: number;
-        propChanges: Record<string, { from: any; to: any }>;
-        hookChanges: Record<string, { from: any; to: any }>;
-    }>;
-    name?: string;
-    onClose?: () => void;
-}) => {
+}: AdvancedRenderTrackerOverlayProps) => {
     const { nodeRef, pos, onMouseDown } = useDraggable();
     const { size, startResize, resizing } = useResizable();
     const [collapsed, setCollapsed] = useState(false);
-    const [expandedRows, setExpandedRows] = useState<{ [key: number]: boolean }>({});
+    const [activeComponentId, setActiveComponentId] = useState<string | null>(null);
+    const [expandedRows, setExpandedRows] = useState<{ [key: string]: boolean }>({});
+    const trackerContext = useOptionalRenderTrackerContext();
+    const contextComponents = trackerContext?.components ?? [];
 
-    const toggleRow = (num: number) => setExpandedRows((prev) => ({ ...prev, [num]: !prev[num] }));
+    const components = useMemo<OverlayComponentHistory[]>(() => {
+        if (history) {
+            return [
+                {
+                    id: "legacy-component",
+                    name,
+                    renderCount: history[history.length - 1]?.renderNumber ?? 0,
+                    history,
+                },
+            ];
+        }
+
+        return contextComponents.map((component) => ({
+            id: component.id,
+            name: component.name,
+            renderCount: component.renderCount,
+            history: component.history,
+        }));
+    }, [contextComponents, history, name]);
+
+    useEffect(() => {
+        if (components.length === 0) {
+            if (activeComponentId !== null) {
+                setActiveComponentId(null);
+            }
+            return;
+        }
+
+        if (!activeComponentId || !components.some((component) => component.id === activeComponentId)) {
+            setActiveComponentId(components[0].id);
+        }
+    }, [activeComponentId, components]);
+
+    const activeComponent =
+        components.find((component) => component.id === activeComponentId) ?? components[0];
+    const activeHistory = activeComponent?.history ?? [];
+
+    const toggleRow = (key: string) => setExpandedRows((prev) => ({ ...prev, [key]: !prev[key] }));
 
     const expandAll = () => {
-        const all = Object.fromEntries(history.map((h) => [h.renderNumber, true]));
-        setExpandedRows(all);
+        if (!activeComponent) return;
+
+        const all = Object.fromEntries(
+            activeHistory.map((entry) => [`${activeComponent.id}-${entry.renderNumber}`, true])
+        );
+        setExpandedRows((prev) => ({ ...prev, ...all }));
     };
     const collapseAll = () => setExpandedRows({});
 
@@ -266,7 +316,12 @@ export const AdvancedRenderTrackerOverlay = ({
                 }}
                 onMouseDown={onMouseDown}
             >
-                <span style={{ fontWeight: "bold" }}>🧩 {name} Render Tracker</span>
+                <span style={{ fontWeight: "bold" }}>
+                    🧩 Render Tracker
+                    <span style={{ color: "#9fb", fontWeight: 500, marginLeft: 8 }}>
+                        {components.length} component{components.length === 1 ? "" : "s"}
+                    </span>
+                </span>
                 <div style={{ display: "flex", gap: 6 }}>
                     <button
                         title={collapsed ? "Expand" : "Collapse"}
@@ -314,151 +369,196 @@ export const AdvancedRenderTrackerOverlay = ({
                         boxSizing: "border-box",
                     }}
                 >
+                    {components.length > 0 && (
+                        <div
+                            role="tablist"
+                            aria-label="Tracked components"
+                            style={{
+                                display: "flex",
+                                gap: 6,
+                                marginBottom: 10,
+                                overflowX: "auto",
+                                paddingBottom: 2,
+                            }}
+                        >
+                            {components.map((component) => {
+                                const selected = component.id === activeComponent?.id;
+
+                                return (
+                                    <button
+                                        key={component.id}
+                                        role="tab"
+                                        aria-selected={selected}
+                                        onClick={() => setActiveComponentId(component.id)}
+                                        style={{
+                                            ...buttonStyle,
+                                            flex: "0 0 auto",
+                                            marginRight: 0,
+                                            background: selected ? "#3a416f" : buttonStyle.background,
+                                            borderColor: selected ? "#74d4ff" : "#40407a",
+                                            color: selected ? "#f7ffff" : buttonStyle.color,
+                                        }}
+                                    >
+                                        {component.name} · {component.renderCount}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+
                     <div style={{ marginBottom: 8, display: "flex", gap: 8 }}>
-                        <button onClick={expandAll} style={buttonStyle}>
+                        <button onClick={expandAll} style={buttonStyle} disabled={!activeComponent}>
                             Expand all
                         </button>
-                        <button onClick={collapseAll} style={buttonStyle}>
+                        <button onClick={collapseAll} style={buttonStyle} disabled={!activeComponent}>
                             Collapse all
                         </button>
                     </div>
-                    {history.length === 0 && (
+
+                    {!activeComponent && (
+                        <div style={{ color: "#888", padding: 16 }}>No tracked components yet.</div>
+                    )}
+
+                    {activeComponent && activeHistory.length === 0 && (
                         <div style={{ color: "#888", padding: 16 }}>No renders tracked yet.</div>
                     )}
-                    {history.map((entry, index) => {
-                        const isExpanded = expandedRows[entry.renderNumber] || false;
-                        return (
-                            <div
-                                key={`${entry.renderNumber}-${index}`}
-                                style={{
-                                    marginBottom: 10,
-                                    background: "#232341",
-                                    borderRadius: 8,
-                                    boxShadow: "0 1px 3px #0004",
-                                    overflow: "hidden",
-                                }}
-                            >
+
+                    {activeComponent &&
+                        activeHistory.map((entry, index) => {
+                            const rowKey = `${activeComponent.id}-${entry.renderNumber}`;
+                            const isExpanded = expandedRows[rowKey] || false;
+                            return (
                                 <div
+                                    key={`${rowKey}-${index}`}
                                     style={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        cursor: "pointer",
-                                        padding: "8px 10px",
-                                        borderBottom: isExpanded ? "1px solid #2a2a48" : undefined,
-                                        fontWeight: 500,
+                                        marginBottom: 10,
+                                        background: "#232341",
+                                        borderRadius: 8,
+                                        boxShadow: "0 1px 3px #0004",
+                                        overflow: "hidden",
                                     }}
-                                    onClick={() => toggleRow(entry.renderNumber)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter" || e.key === " ") {
-                                            e.preventDefault();
-                                            toggleRow(entry.renderNumber);
-                                        }
-                                    }}
-                                    tabIndex={0}
-                                    role="button"
-                                    aria-expanded={isExpanded}
-                                    title="Expand/collapse details"
                                 >
-                                    <span style={{ marginRight: 6, color: "#7fd" }}>
-                                        #{entry.renderNumber}
-                                    </span>
-                                    <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
-                                    <span style={{ marginLeft: 12, color: "#8fd" }}>
-                                        {Object.keys(entry.propChanges).length > 0 && "📝 Props "}
-                                        {Object.keys(entry.hookChanges).length > 0 && "🎣 Hooks "}
-                                        {Object.keys(entry.propChanges).length === 0 &&
-                                            Object.keys(entry.hookChanges).length === 0 && (
-                                                <span style={{ color: "#aaa" }}>No changes</span>
-                                            )}
-                                    </span>
-                                    <span style={{ flex: 1 }} />
-                                    <span style={{ fontSize: 18, color: "#fff6", marginRight: 2 }}>
-                                        {isExpanded ? "▼" : "►"}
-                                    </span>
-                                </div>
-                                {isExpanded && (
                                     <div
                                         style={{
-                                            padding: "10px 12px",
-                                            background: "#202038",
-                                            fontSize: 14,
+                                            display: "flex",
+                                            alignItems: "center",
+                                            cursor: "pointer",
+                                            padding: "8px 10px",
+                                            borderBottom: isExpanded ? "1px solid #2a2a48" : undefined,
+                                            fontWeight: 500,
                                         }}
+                                        onClick={() => toggleRow(rowKey)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter" || e.key === " ") {
+                                                e.preventDefault();
+                                                toggleRow(rowKey);
+                                            }
+                                        }}
+                                        tabIndex={0}
+                                        role="button"
+                                        aria-expanded={isExpanded}
+                                        title="Expand/collapse details"
                                     >
-                                        {/* Prop changes */}
-                                        <div>
-                                            <strong>Prop Changes:</strong>
-                                            {Object.keys(entry.propChanges).length === 0 ? (
-                                                <div style={{ color: "#888" }}>None</div>
-                                            ) : (
-                                                <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                                    {Object.entries(entry.propChanges).map(
-                                                        ([key, { from, to }]) => (
-                                                            <li
-                                                                key={key}
-                                                                style={{ marginBottom: "8px" }}
-                                                            >
-                                                                <span style={{ color: "#ffd080" }}>
-                                                                    {key}:
-                                                                </span>
-                                                                <div style={{ marginTop: "4px" }}>
-                                                                    <div
-                                                                        style={{
-                                                                            color: "#f99",
-                                                                            marginBottom: "4px",
-                                                                        }}
-                                                                    >
-                                                                        From: {formatValue(from)}
-                                                                    </div>
-                                                                    <div style={{ color: "#9f9" }}>
-                                                                        To: {formatValue(to)}
-                                                                    </div>
-                                                                </div>
-                                                            </li>
-                                                        )
-                                                    )}
-                                                </ul>
-                                            )}
-                                        </div>
-                                        {/* Hook changes */}
-                                        <div style={{ marginTop: 8 }}>
-                                            <strong>Hook Dependency Changes:</strong>
-                                            {Object.keys(entry.hookChanges).length === 0 ? (
-                                                <div style={{ color: "#888" }}>None</div>
-                                            ) : (
-                                                <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                                    {Object.entries(entry.hookChanges).map(
-                                                        ([key, { from, to }]) => (
-                                                            <li
-                                                                key={key}
-                                                                style={{ marginBottom: "8px" }}
-                                                            >
-                                                                <span style={{ color: "#80d9ff" }}>
-                                                                    {key}:
-                                                                </span>
-                                                                <div style={{ marginTop: "4px" }}>
-                                                                    <div
-                                                                        style={{
-                                                                            color: "#f99",
-                                                                            marginBottom: "4px",
-                                                                        }}
-                                                                    >
-                                                                        From: {formatValue(from)}
-                                                                    </div>
-                                                                    <div style={{ color: "#9f9" }}>
-                                                                        To: {formatValue(to)}
-                                                                    </div>
-                                                                </div>
-                                                            </li>
-                                                        )
-                                                    )}
-                                                </ul>
-                                            )}
-                                        </div>
+                                        <span style={{ marginRight: 6, color: "#7fd" }}>
+                                            #{entry.renderNumber}
+                                        </span>
+                                        <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                                        <span style={{ marginLeft: 12, color: "#8fd" }}>
+                                            {Object.keys(entry.propChanges).length > 0 && "📝 Props "}
+                                            {Object.keys(entry.hookChanges).length > 0 && "🎣 Hooks "}
+                                            {Object.keys(entry.propChanges).length === 0 &&
+                                                Object.keys(entry.hookChanges).length === 0 && (
+                                                    <span style={{ color: "#aaa" }}>No changes</span>
+                                                )}
+                                        </span>
+                                        <span style={{ flex: 1 }} />
+                                        <span style={{ fontSize: 18, color: "#fff6", marginRight: 2 }}>
+                                            {isExpanded ? "▼" : "►"}
+                                        </span>
                                     </div>
-                                )}
-                            </div>
-                        );
-                    })}
+                                    {isExpanded && (
+                                        <div
+                                            style={{
+                                                padding: "10px 12px",
+                                                background: "#202038",
+                                                fontSize: 14,
+                                            }}
+                                        >
+                                            {/* Prop changes */}
+                                            <div>
+                                                <strong>Prop Changes:</strong>
+                                                {Object.keys(entry.propChanges).length === 0 ? (
+                                                    <div style={{ color: "#888" }}>None</div>
+                                                ) : (
+                                                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                                        {Object.entries(entry.propChanges).map(
+                                                            ([key, { from, to }]) => (
+                                                                <li
+                                                                    key={key}
+                                                                    style={{ marginBottom: "8px" }}
+                                                                >
+                                                                    <span style={{ color: "#ffd080" }}>
+                                                                        {key}:
+                                                                    </span>
+                                                                    <div style={{ marginTop: "4px" }}>
+                                                                        <div
+                                                                            style={{
+                                                                                color: "#f99",
+                                                                                marginBottom: "4px",
+                                                                            }}
+                                                                        >
+                                                                            From: {formatValue(from)}
+                                                                        </div>
+                                                                        <div style={{ color: "#9f9" }}>
+                                                                            To: {formatValue(to)}
+                                                                        </div>
+                                                                    </div>
+                                                                </li>
+                                                            )
+                                                        )}
+                                                    </ul>
+                                                )}
+                                            </div>
+                                            {/* Hook changes */}
+                                            <div style={{ marginTop: 8 }}>
+                                                <strong>Hook Dependency Changes:</strong>
+                                                {Object.keys(entry.hookChanges).length === 0 ? (
+                                                    <div style={{ color: "#888" }}>None</div>
+                                                ) : (
+                                                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                                        {Object.entries(entry.hookChanges).map(
+                                                            ([key, { from, to }]) => (
+                                                                <li
+                                                                    key={key}
+                                                                    style={{ marginBottom: "8px" }}
+                                                                >
+                                                                    <span style={{ color: "#80d9ff" }}>
+                                                                        {key}:
+                                                                    </span>
+                                                                    <div style={{ marginTop: "4px" }}>
+                                                                        <div
+                                                                            style={{
+                                                                                color: "#f99",
+                                                                                marginBottom: "4px",
+                                                                            }}
+                                                                        >
+                                                                            From: {formatValue(from)}
+                                                                        </div>
+                                                                        <div style={{ color: "#9f9" }}>
+                                                                            To: {formatValue(to)}
+                                                                        </div>
+                                                                    </div>
+                                                                </li>
+                                                            )
+                                                        )}
+                                                    </ul>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
                 </div>
             )}
 

@@ -1,5 +1,9 @@
 import { useState } from 'react'
-import { useAdvancedRenderTracker, AdvancedRenderTrackerOverlay } from 'react-rerender-hook'
+import {
+  useAdvancedRenderTracker,
+  AdvancedRenderTrackerOverlay,
+  RenderTrackerProvider,
+} from 'react-rerender-hook'
 
 // ─── Demo 1: Prop change tracking ─────────────────────────────────────────
 interface CounterProps {
@@ -127,27 +131,69 @@ function FilteredList({ items, filter }: FilteredListProps) {
   )
 }
 
-// ─── Demo 4: Visual overlay ────────────────────────────────────────────────
+// ─── Demo 4: Global visual overlay ─────────────────────────────────────────
 interface OverlayDemoProps {
   value: string
   counter: number
 }
 
-function OverlayDemo({ value, counter }: OverlayDemoProps) {
-  const { renderHistory } = useAdvancedRenderTracker(
-    'OverlayDemo',
+function OverlayMetricCard({ value, counter }: OverlayDemoProps) {
+  const { renderCount, renderHistory } = useAdvancedRenderTracker(
+    'OverlayMetricCard',
     { value, counter },
     {},
     { logToConsole: false },
   )
-  const [showOverlay, setShowOverlay] = useState(true)
+  const last = renderHistory[renderHistory.length - 1]
+
   return (
     <div className="component-box">
-      <div className="box-label">OverlayDemo component</div>
+      <div className="box-label">OverlayMetricCard component</div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>
           value: <code>{value}</code> &nbsp;·&nbsp; counter: <strong>{counter}</strong>
         </span>
+        <span className="render-badge">Renders: {renderCount}</span>
+      </div>
+      {last && Object.keys(last.propChanges).length > 0 && (
+        <div className="hint">Last changed props: {Object.keys(last.propChanges).join(', ')}</div>
+      )}
+    </div>
+  )
+}
+
+function OverlayTextPreview({ value }: { value: string }) {
+  const normalized = value.trim().toLowerCase()
+  const { renderCount, renderHistory } = useAdvancedRenderTracker(
+    'OverlayTextPreview',
+    { value },
+    { normalizedLength: normalized.length },
+    { logToConsole: false },
+  )
+  const last = renderHistory[renderHistory.length - 1]
+
+  return (
+    <div className="component-box">
+      <div className="box-label">OverlayTextPreview component</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>
+          normalized: <code>{normalized || '(empty)'}</code>
+        </span>
+        <span className="render-badge">Renders: {renderCount}</span>
+      </div>
+      {last && Object.keys(last.hookChanges).length > 0 && (
+        <div className="hint">Hook deps changed: {Object.keys(last.hookChanges).join(', ')}</div>
+      )}
+    </div>
+  )
+}
+
+function OverlayPanelController() {
+  const [showOverlay, setShowOverlay] = useState(true)
+
+  return (
+    <>
+      <div className="controls" style={{ marginTop: 10 }}>
         <button
           className="secondary"
           style={{ fontSize: '0.75rem', padding: '4px 10px' }}
@@ -156,14 +202,8 @@ function OverlayDemo({ value, counter }: OverlayDemoProps) {
           {showOverlay ? 'Hide' : 'Show'} overlay
         </button>
       </div>
-      {showOverlay && (
-        <AdvancedRenderTrackerOverlay
-          name="OverlayDemo"
-          history={renderHistory}
-          onClose={() => setShowOverlay(false)}
-        />
-      )}
-    </div>
+      {showOverlay && <AdvancedRenderTrackerOverlay onClose={() => setShowOverlay(false)} />}
+    </>
   )
 }
 
@@ -284,9 +324,8 @@ export default function App() {
       <div className="section">
         <div className="section-title">4 — Visual overlay</div>
         <div className="section-desc">
-          <code>AdvancedRenderTrackerOverlay</code> renders a draggable, resizable floating panel
-          with the full render history. Drag it by the header, resize from the edges, and click
-          entries to expand change details.
+          <code>RenderTrackerProvider</code> aggregates multiple tracked components into one
+          draggable, resizable <code>AdvancedRenderTrackerOverlay</code> panel.
         </div>
         <div className="controls">
           <button onClick={() => setOverlayCounter((c) => c + 1)}>Increment counter</button>
@@ -299,7 +338,11 @@ export default function App() {
             />
           </label>
         </div>
-        <OverlayDemo value={overlayValue} counter={overlayCounter} />
+        <RenderTrackerProvider>
+          <OverlayMetricCard value={overlayValue} counter={overlayCounter} />
+          <OverlayTextPreview value={overlayValue} />
+          <OverlayPanelController />
+        </RenderTrackerProvider>
       </div>
     </div>
   )

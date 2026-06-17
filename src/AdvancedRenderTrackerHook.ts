@@ -1,4 +1,5 @@
 import { useRef, useEffect } from "react";
+import { useOptionalRenderTrackerDispatch } from "./RenderTrackerContext";
 
 // Enhanced deep equal utility with circular reference protection
 const deepEqual = (a: any, b: any, visited = new WeakMap()): boolean => {
@@ -32,19 +33,26 @@ const deepEqual = (a: any, b: any, visited = new WeakMap()): boolean => {
 type PropsType = Record<string, any>;
 type HookDependencies = Record<string, any>;
 
-interface RenderRecord {
+export interface RenderRecord {
     renderNumber: number;
     timestamp: number;
     propChanges: Record<string, { from: any; to: any }>;
     hookChanges: Record<string, { from: any; to: any }>;
 }
 
-interface RenderTrackerOptions {
+export interface RenderTrackerOptions {
     logToConsole?: boolean;
     trackHooks?: boolean;
     deepCompare?: boolean;
     maxHistory?: number;
 }
+
+let renderTrackerIdCounter = 0;
+
+const createRenderTrackerId = (name: string) => {
+    renderTrackerIdCounter += 1;
+    return `${name}-${renderTrackerIdCounter}`;
+};
 
 /**
  * Custom hook to track component re-renders with detailed prop and hook dependency changes.
@@ -74,10 +82,27 @@ export const useAdvancedRenderTracker = (
     const renderCountRef = useRef(0);
     renderCountRef.current += 1;
     const currentRender = renderCountRef.current;
+    const trackerIdRef = useRef<string>();
+    if (!trackerIdRef.current) {
+        trackerIdRef.current = createRenderTrackerId(name);
+    }
 
     const prevProps = useRef<PropsType>(props);
     const prevHookDeps = useRef<HookDependencies>(hookDependencies);
     const renderHistory = useRef<RenderRecord[]>([]);
+    const renderTracker = useOptionalRenderTrackerDispatch();
+
+    useEffect(() => {
+        if (!renderTracker || !trackerIdRef.current) {
+            return;
+        }
+
+        const trackerId = trackerIdRef.current;
+
+        return () => {
+            renderTracker.unregisterComponent(trackerId);
+        };
+    }, [renderTracker]);
 
     // This effect intentionally has no dependency array so it runs after every render,
     // which is exactly what we need to capture every re-render regardless of cause.
@@ -142,7 +167,7 @@ export const useAdvancedRenderTracker = (
 
         // Keep only last N renders to avoid memory leaks
         if (renderHistory.current.length > maxHistory) {
-            renderHistory.current = renderHistory.current.slice(-maxHistory);
+            renderHistory.current.splice(0, renderHistory.current.length - maxHistory);
         }
 
         // Console logging
@@ -166,6 +191,16 @@ export const useAdvancedRenderTracker = (
             console.groupEnd();
         } else if (logToConsole) {
             console.log(`🚀 ${name} initial render`);
+        }
+
+        if (renderTracker && trackerIdRef.current) {
+            renderTracker.recordComponent({
+                id: trackerIdRef.current,
+                name,
+                renderCount: currentRender,
+                history: renderHistory.current,
+                updatedAt: timestamp,
+            });
         }
 
         // Update refs
