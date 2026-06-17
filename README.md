@@ -105,8 +105,8 @@ const DebuggableComponent = (props) => {
 | :--- | :--- | :--- | :--- |
 | `logToConsole` | `boolean` | `true` | Whether to log changes to the browser console. |
 | `trackHooks` | `boolean` | `true` | Whether to track `hookDependencies`. |
-| `deepCompare` | `boolean` | `false` | Use deep equality for comparisons. |
-| `maxHistory` | `number` | `10` | Number of renders to keep in history. |
+| `deepCompare` | `boolean` | `true` | Use deep equality for comparisons. |
+| `maxHistory` | `number` | `50` | Number of renders to keep in history. |
 
 ### `AdvancedRenderTrackerOverlay`
 
