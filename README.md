@@ -9,7 +9,6 @@ A powerful React hook and overlay component to track, debug, and visualize compo
 - 🎣 **Hook Dependency Tracking**: Monitor changes in internal hook dependencies.
 - 🔍 **Deep Comparison**: Optional deep equality check for complex objects.
 - 📊 **Visual Overlay**: An interactive, draggable, and resizable overlay to inspect render history.
-- 🧩 **Shared Provider**: Aggregate multiple tracked components into one global overlay.
 - 🪵 **Console Logging**: Detailed, grouped console logs with tables of changes.
 
 ## Installation
@@ -59,46 +58,35 @@ const MyComponent = (props) => {
 };
 ```
 
-### `RenderTrackerProvider` and `AdvancedRenderTrackerOverlay`
+### `AdvancedRenderTrackerOverlay`
 
-Wrap a section of your app with `RenderTrackerProvider` to aggregate all tracked children into one shared overlay. The overlay reads from context, so you do not need to pass `renderHistory` through props.
+To see the render history in a visual overlay, use the `AdvancedRenderTrackerOverlay` component.
 
 ```tsx
 import React, { useState } from 'react';
-import {
-  useAdvancedRenderTracker,
-  RenderTrackerProvider,
-  AdvancedRenderTrackerOverlay,
-} from 'react-rerender-hook';
+import { useAdvancedRenderTracker, AdvancedRenderTrackerOverlay } from 'react-rerender-hook';
 
-const Header = ({ title }) => {
-  useAdvancedRenderTracker('Header', { title });
-  return <h1>{title}</h1>;
-};
-
-const Counter = ({ count }) => {
-  useAdvancedRenderTracker('Counter', { count });
-  return <strong>{count}</strong>;
-};
-
-const DebugPanel = () => {
+const DebuggableComponent = (props) => {
   const [showOverlay, setShowOverlay] = useState(true);
+  const { renderHistory } = useAdvancedRenderTracker('DebuggableComponent', props);
 
-  return showOverlay ? (
-    <AdvancedRenderTrackerOverlay onClose={() => setShowOverlay(false)} />
-  ) : null;
+  return (
+    <div>
+      <h1>My App</h1>
+      
+      {showOverlay && (
+        <AdvancedRenderTrackerOverlay 
+          history={renderHistory} 
+          name="DebuggableComponent"
+          onClose={() => setShowOverlay(false)}
+        />
+      )}
+      
+      {/* Component Content */}
+    </div>
+  );
 };
-
-const App = () => (
-  <RenderTrackerProvider>
-    <Header title="My App" />
-    <Counter count={1} />
-    <DebugPanel />
-  </RenderTrackerProvider>
-);
 ```
-
-You can still pass `history` and `name` directly to `AdvancedRenderTrackerOverlay` for the legacy single-component view.
 
 ## API Reference
 
@@ -117,23 +105,13 @@ You can still pass `history` and `name` directly to `AdvancedRenderTrackerOverla
 | :--- | :--- | :--- | :--- |
 | `logToConsole` | `boolean` | `true` | Whether to log changes to the browser console. |
 | `trackHooks` | `boolean` | `true` | Whether to track `hookDependencies`. |
-| `deepCompare` | `boolean` | `true` | Use deep equality for comparisons. |
-| `maxHistory` | `number` | `50` | Number of renders to keep in history. |
-
-### `RenderTrackerProvider`
-
-| Prop | Type | Description |
-| :--- | :--- | :--- |
-| `children` | `ReactNode` | Components that can register render history in the shared store. |
-
-### `useRenderTrackerContext()`
-
-Returns `{ components }`, where each component includes `id`, `name`, `renderCount`, `history`, and `updatedAt`. Must be used inside `RenderTrackerProvider`.
+| `deepCompare` | `boolean` | `false` | Use deep equality for comparisons. |
+| `maxHistory` | `number` | `10` | Number of renders to keep in history. |
 
 ### `AdvancedRenderTrackerOverlay`
 
 | Prop | Type | Description |
 | :--- | :--- | :--- |
-| `history` | `Array` | (Optional) Legacy single-component history array returned by `useAdvancedRenderTracker`. If omitted, the overlay reads all tracked components from `RenderTrackerProvider`. |
-| `name` | `string` | (Optional) Name to display for the legacy single-component view. |
+| `history` | `Array` | The history array returned by `useAdvancedRenderTracker`. |
+| `name` | `string` | (Optional) Name to display in the header. |
 | `onClose` | `function` | (Optional) Callback when the close button is clicked. |
