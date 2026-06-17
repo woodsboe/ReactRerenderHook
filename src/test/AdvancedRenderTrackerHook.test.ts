@@ -448,7 +448,7 @@ describe("useAdvancedRenderTracker — performance tracking", () => {
         time = 1000;
         // startTime = 1000
         // in useLayoutEffect, performance.now() = 1010 -> duration = 10
-        vi.spyOn(performance, "now").mockImplementation(() => {
+        vi.mocked(performance.now).mockImplementation(() => {
             const current = time;
             time += 10;
             return current;
