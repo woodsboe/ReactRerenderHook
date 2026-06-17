@@ -83,6 +83,7 @@ export const useAdvancedRenderTracker = (
     // which is exactly what we need to capture every re-render regardless of cause.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
+        renderCountRef.current = currentRender;
         const timestamp = Date.now();
 
         const compareFn = deepCompare
