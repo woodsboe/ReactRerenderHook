@@ -1,6 +1,21 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { RenderRecord } from "./AdvancedRenderTrackerHook";
+import { useOptionalRenderTrackerContext } from "./RenderTrackerContext";
 
-// Safe JSON stringify that handles circular references
+// Fix #14: Move buttonStyle above component so constants precede their consumers
+const buttonStyle: React.CSSProperties = {
+    background: "#282850",
+    color: "#aef",
+    border: "1px solid #40407a",
+    borderRadius: 5,
+    padding: "4px 10px",
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: "pointer",
+    marginRight: 3,
+};
+
+// Fix #4: safeStringify now properly passes and increments currentDepth during recursion
 const safeStringify = (obj: any, maxDepth = 3, currentDepth = 0): string => {
     if (currentDepth > maxDepth) {
         return "[Max Depth Reached]";
@@ -8,7 +23,7 @@ const safeStringify = (obj: any, maxDepth = 3, currentDepth = 0): string => {
 
     const seen = new WeakSet();
 
-    const replacer = (key: string, value: any): any => {
+    const replacer = (_key: string, value: any): any => {
         // Handle circular references
         if (typeof value === "object" && value !== null) {
             if (seen.has(value)) {
@@ -23,7 +38,7 @@ const safeStringify = (obj: any, maxDepth = 3, currentDepth = 0): string => {
         }
 
         // Handle DOM elements
-        if (value instanceof Element) {
+        if (typeof Element !== "undefined" && value instanceof Element) {
             return `[DOM Element: ${value.tagName.toLowerCase()}]`;
         }
 
@@ -32,9 +47,17 @@ const safeStringify = (obj: any, maxDepth = 3, currentDepth = 0): string => {
             return `[Function: ${value.name || "anonymous"}]`;
         }
 
-        // Handle other complex objects at max depth
-        if (currentDepth >= maxDepth && typeof value === "object" && value !== null) {
-            return "[Complex Object]";
+        // Handle nested objects beyond max depth by recursing with incremented depth
+        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+            if (currentDepth >= maxDepth) {
+                return "[Complex Object]";
+            }
+            // Recurse with incremented depth for nested objects
+            try {
+                return JSON.parse(safeStringify(value, maxDepth, currentDepth + 1));
+            } catch {
+                return "[Complex Object]";
+            }
         }
 
         return value;
@@ -47,8 +70,8 @@ const safeStringify = (obj: any, maxDepth = 3, currentDepth = 0): string => {
     }
 };
 
-// Enhanced utility to help with safe value display
-const formatValue = (val: any) => {
+// Fix #15: Return type is React.ReactNode (string | JSX.Element)
+const formatValue = (val: any): React.ReactNode => {
     if (val === null) return "null";
     if (val === undefined) return "undefined";
     if (typeof val === "string") return `"${val}"`;
@@ -80,7 +103,7 @@ const formatValue = (val: any) => {
     return String(val);
 };
 
-// Resizable overlay hook
+// Fix #12: Remove unreachable 'left' and 'top' directions — no handles exist for them
 const useResizable = (initialSize = { width: 480, height: 400 }) => {
     const [size, setSize] = useState(initialSize);
     const [resizing, setResizing] = useState<string | null>(null);
@@ -96,17 +119,11 @@ const useResizable = (initialSize = { width: 480, height: 400 }) => {
             let newWidth = resizeStart.current.width;
             let newHeight = resizeStart.current.height;
 
-            if (resizing.includes('right')) {
+            if (resizing.includes("right")) {
                 newWidth = Math.max(320, Math.min(window.innerWidth * 0.9, resizeStart.current.width + deltaX));
             }
-            if (resizing.includes('left')) {
-                newWidth = Math.max(320, Math.min(window.innerWidth * 0.9, resizeStart.current.width - deltaX));
-            }
-            if (resizing.includes('bottom')) {
+            if (resizing.includes("bottom")) {
                 newHeight = Math.max(200, Math.min(window.innerHeight * 0.8, resizeStart.current.height + deltaY));
-            }
-            if (resizing.includes('top')) {
-                newHeight = Math.max(200, Math.min(window.innerHeight * 0.8, resizeStart.current.height - deltaY));
             }
 
             setSize({ width: newWidth, height: newHeight });
@@ -139,7 +156,7 @@ const useResizable = (initialSize = { width: 480, height: 400 }) => {
     return { size, startResize, resizing };
 };
 
-// Draggable overlay
+// Fix #11: Clamp drag position so the overlay can't be dragged off-screen
 const useDraggable = (initial = { x: 40, y: 40 }) => {
     const nodeRef = useRef<HTMLDivElement>(null);
     const [pos, setPos] = useState(initial);
@@ -148,11 +165,11 @@ const useDraggable = (initial = { x: 40, y: 40 }) => {
 
     useEffect(() => {
         const onMove = (e: MouseEvent) => {
-            if (!dragging) return;
-            setPos({
-                x: e.clientX - dragOffset.current.x,
-                y: e.clientY - dragOffset.current.y,
-            });
+            if (!dragging || !nodeRef.current) return;
+            const { offsetWidth, offsetHeight } = nodeRef.current;
+            const newX = Math.max(0, Math.min(window.innerWidth - offsetWidth, e.clientX - dragOffset.current.x));
+            const newY = Math.max(0, Math.min(window.innerHeight - offsetHeight, e.clientY - dragOffset.current.y));
+            setPos({ x: newX, y: newY });
         };
         const onUp = () => setDragging(false);
 
@@ -176,32 +193,86 @@ const useDraggable = (initial = { x: 40, y: 40 }) => {
     return { nodeRef, pos, onMouseDown };
 };
 
+const HEADER_HEIGHT = 45; // px — height of the fixed header
+
+interface AdvancedRenderTrackerOverlayProps {
+    history?: RenderRecord[];
+    name?: string;
+    onClose?: () => void;
+}
+
+interface OverlayComponentHistory {
+    id: string;
+    name: string;
+    renderCount: number;
+    history: RenderRecord[];
+}
+
 export const AdvancedRenderTrackerOverlay = ({
     history,
     name = "Component",
     onClose,
-}: {
-    history: Array<{
-        renderNumber: number;
-        timestamp: number;
-        propChanges: Record<string, { from: any; to: any }>;
-        hookChanges: Record<string, { from: any; to: any }>;
-    }>;
-    name?: string;
-    onClose?: () => void;
-}) => {
+}: AdvancedRenderTrackerOverlayProps) => {
     const { nodeRef, pos, onMouseDown } = useDraggable();
     const { size, startResize, resizing } = useResizable();
     const [collapsed, setCollapsed] = useState(false);
-    const [expandedRows, setExpandedRows] = useState<{ [key: number]: boolean }>({});
+    const [activeComponentId, setActiveComponentId] = useState<string | null>(null);
+    const [expandedRows, setExpandedRows] = useState<{ [key: string]: boolean }>({});
+    const trackerContext = useOptionalRenderTrackerContext();
+    const contextComponents = trackerContext?.components ?? [];
 
-    const toggleRow = (num: number) => setExpandedRows((prev) => ({ ...prev, [num]: !prev[num] }));
+    const components = useMemo<OverlayComponentHistory[]>(() => {
+        if (history) {
+            return [
+                {
+                    id: "legacy-component",
+                    name,
+                    renderCount: history[history.length - 1]?.renderNumber ?? 0,
+                    history,
+                },
+            ];
+        }
+
+        return contextComponents.map((component) => ({
+            id: component.id,
+            name: component.name,
+            renderCount: component.renderCount,
+            history: component.history,
+        }));
+    }, [contextComponents, history, name]);
+
+    useEffect(() => {
+        if (components.length === 0) {
+            if (activeComponentId !== null) {
+                setActiveComponentId(null);
+            }
+            return;
+        }
+
+        if (!activeComponentId || !components.some((component) => component.id === activeComponentId)) {
+            setActiveComponentId(components[0].id);
+        }
+    }, [activeComponentId, components]);
+
+    const activeComponent =
+        components.find((component) => component.id === activeComponentId) ?? components[0];
+    const activeHistory = activeComponent?.history ?? [];
+
+    const toggleRow = (key: string) => setExpandedRows((prev) => ({ ...prev, [key]: !prev[key] }));
 
     const expandAll = () => {
-        const all = Object.fromEntries(history.map((h) => [h.renderNumber, true]));
-        setExpandedRows(all);
+        if (!activeComponent) return;
+
+        const all = Object.fromEntries(
+            activeHistory.map((entry) => [`${activeComponent.id}-${entry.renderNumber}`, true])
+        );
+        setExpandedRows((prev) => ({ ...prev, ...all }));
     };
     const collapseAll = () => setExpandedRows({});
+
+    // Fix #13: Body height = total container height minus header height, so resizing
+    // the overlay actually expands the scrollable content area
+    const bodyHeight = collapsed ? 0 : size.height - HEADER_HEIGHT;
 
     return (
         <div
@@ -212,7 +283,7 @@ export const AdvancedRenderTrackerOverlay = ({
                 top: pos.y,
                 zIndex: 99999,
                 width: size.width,
-                height: size.height,
+                height: collapsed ? HEADER_HEIGHT : size.height,
                 minWidth: 320,
                 maxWidth: "90vw",
                 maxHeight: "80vh",
@@ -232,6 +303,7 @@ export const AdvancedRenderTrackerOverlay = ({
             {/* Header */}
             <div
                 style={{
+                    height: HEADER_HEIGHT,
                     padding: "8px 12px",
                     background: "#232341",
                     borderBottom: "1px solid #282850",
@@ -240,10 +312,16 @@ export const AdvancedRenderTrackerOverlay = ({
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
+                    boxSizing: "border-box",
                 }}
                 onMouseDown={onMouseDown}
             >
-                <span style={{ fontWeight: "bold" }}>🧩 {name} Render Tracker</span>
+                <span style={{ fontWeight: "bold" }}>
+                    🧩 Render Tracker
+                    <span style={{ color: "#9fb", fontWeight: 500, marginLeft: 8 }}>
+                        {components.length} component{components.length === 1 ? "" : "s"}
+                    </span>
+                </span>
                 <div style={{ display: "flex", gap: 6 }}>
                     <button
                         title={collapsed ? "Expand" : "Collapse"}
@@ -280,175 +358,221 @@ export const AdvancedRenderTrackerOverlay = ({
                 </div>
             </div>
 
-            {/* Body */}
+            {/* Body — Fix #13: height tracks the resizable container */}
             {!collapsed && (
                 <div
                     style={{
-                        maxHeight: 400,
+                        height: bodyHeight,
                         overflow: "auto",
                         padding: 10,
                         background: "#202034",
+                        boxSizing: "border-box",
                     }}
                 >
+                    {components.length > 0 && (
+                        <div
+                            role="tablist"
+                            aria-label="Tracked components"
+                            style={{
+                                display: "flex",
+                                gap: 6,
+                                marginBottom: 10,
+                                overflowX: "auto",
+                                paddingBottom: 2,
+                            }}
+                        >
+                            {components.map((component) => {
+                                const selected = component.id === activeComponent?.id;
+
+                                return (
+                                    <button
+                                        key={component.id}
+                                        role="tab"
+                                        aria-selected={selected}
+                                        onClick={() => setActiveComponentId(component.id)}
+                                        style={{
+                                            ...buttonStyle,
+                                            flex: "0 0 auto",
+                                            marginRight: 0,
+                                            background: selected ? "#3a416f" : buttonStyle.background,
+                                            borderColor: selected ? "#74d4ff" : "#40407a",
+                                            color: selected ? "#f7ffff" : buttonStyle.color,
+                                        }}
+                                    >
+                                        {component.name} · {component.renderCount}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+
                     <div style={{ marginBottom: 8, display: "flex", gap: 8 }}>
-                        <button onClick={expandAll} style={buttonStyle}>
+                        <button onClick={expandAll} style={buttonStyle} disabled={!activeComponent}>
                             Expand all
                         </button>
-                        <button onClick={collapseAll} style={buttonStyle}>
+                        <button onClick={collapseAll} style={buttonStyle} disabled={!activeComponent}>
                             Collapse all
                         </button>
                     </div>
-                    {history.length === 0 && (
+
+                    {!activeComponent && (
+                        <div style={{ color: "#888", padding: 16 }}>No tracked components yet.</div>
+                    )}
+
+                    {activeComponent && activeHistory.length === 0 && (
                         <div style={{ color: "#888", padding: 16 }}>No renders tracked yet.</div>
                     )}
-                    {history.map((entry) => {
-                        const isExpanded = expandedRows[entry.renderNumber] || false;
-                        return (
-                            <div
-                                key={entry.renderNumber}
-                                style={{
-                                    marginBottom: 10,
-                                    background: "#232341",
-                                    borderRadius: 8,
-                                    boxShadow: "0 1px 3px #0004",
-                                    overflow: "hidden",
-                                }}
-                            >
+
+                    {activeComponent &&
+                        activeHistory.map((entry, index) => {
+                            const rowKey = `${activeComponent.id}-${entry.renderNumber}`;
+                            const isExpanded = expandedRows[rowKey] || false;
+                            return (
                                 <div
+                                    key={`${rowKey}-${index}`}
                                     style={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        cursor: "pointer",
-                                        padding: "8px 10px",
-                                        borderBottom: isExpanded ? "1px solid #2a2a48" : undefined,
-                                        fontWeight: 500,
+                                        marginBottom: 10,
+                                        background: "#232341",
+                                        borderRadius: 8,
+                                        boxShadow: "0 1px 3px #0004",
+                                        overflow: "hidden",
                                     }}
-                                    onClick={() => toggleRow(entry.renderNumber)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter" || e.key === " ") {
-                                            e.preventDefault();
-                                            toggleRow(entry.renderNumber);
-                                        }
-                                    }}
-                                    tabIndex={0}
-                                    role="button"
-                                    aria-expanded={isExpanded}
-                                    title="Expand/collapse details"
                                 >
-                                    <span style={{ marginRight: 6, color: "#7fd" }}>
-                                        #{entry.renderNumber}
-                                    </span>
-                                    <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
-                                    <span style={{ marginLeft: 12, color: "#8fd" }}>
-                                        {Object.keys(entry.propChanges).length > 0 && "📝 Props "}
-                                        {Object.keys(entry.hookChanges).length > 0 && "🎣 Hooks "}
-                                        {Object.keys(entry.propChanges).length === 0 &&
-                                            Object.keys(entry.hookChanges).length === 0 && (
-                                                <span style={{ color: "#aaa" }}>No changes</span>
-                                            )}
-                                    </span>
-                                    <span style={{ flex: 1 }} />
-                                    <span style={{ fontSize: 18, color: "#fff6", marginRight: 2 }}>
-                                        {isExpanded ? "▼" : "►"}
-                                    </span>
-                                </div>
-                                {isExpanded && (
                                     <div
                                         style={{
-                                            padding: "10px 12px",
-                                            background: "#202038",
-                                            fontSize: 14,
+                                            display: "flex",
+                                            alignItems: "center",
+                                            cursor: "pointer",
+                                            padding: "8px 10px",
+                                            borderBottom: isExpanded ? "1px solid #2a2a48" : undefined,
+                                            fontWeight: 500,
                                         }}
+                                        onClick={() => toggleRow(rowKey)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter" || e.key === " ") {
+                                                e.preventDefault();
+                                                toggleRow(rowKey);
+                                            }
+                                        }}
+                                        tabIndex={0}
+                                        role="button"
+                                        aria-expanded={isExpanded}
+                                        title="Expand/collapse details"
                                     >
-                                        {/* Prop changes */}
-                                        <div>
-                                            <strong>Prop Changes:</strong>
-                                            {Object.keys(entry.propChanges).length === 0 ? (
-                                                <div style={{ color: "#888" }}>None</div>
-                                            ) : (
-                                                <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                                    {Object.entries(entry.propChanges).map(
-                                                        ([key, { from, to }]) => (
-                                                            <li
-                                                                key={key}
-                                                                style={{ marginBottom: "8px" }}
-                                                            >
-                                                                <span style={{ color: "#ffd080" }}>
-                                                                    {key}:
-                                                                </span>
-                                                                <div style={{ marginTop: "4px" }}>
-                                                                    <div
-                                                                        style={{
-                                                                            color: "#f99",
-                                                                            marginBottom: "4px",
-                                                                        }}
-                                                                    >
-                                                                        From: {formatValue(from)}
-                                                                    </div>
-                                                                    <div style={{ color: "#9f9" }}>
-                                                                        To: {formatValue(to)}
-                                                                    </div>
-                                                                </div>
-                                                            </li>
-                                                        )
-                                                    )}
-                                                </ul>
-                                            )}
-                                        </div>
-                                        {/* Hook changes */}
-                                        <div style={{ marginTop: 8 }}>
-                                            <strong>Hook Dependency Changes:</strong>
-                                            {Object.keys(entry.hookChanges).length === 0 ? (
-                                                <div style={{ color: "#888" }}>None</div>
-                                            ) : (
-                                                <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                                    {Object.entries(entry.hookChanges).map(
-                                                        ([key, { from, to }]) => (
-                                                            <li
-                                                                key={key}
-                                                                style={{ marginBottom: "8px" }}
-                                                            >
-                                                                <span style={{ color: "#80d9ff" }}>
-                                                                    {key}:
-                                                                </span>
-                                                                <div style={{ marginTop: "4px" }}>
-                                                                    <div
-                                                                        style={{
-                                                                            color: "#f99",
-                                                                            marginBottom: "4px",
-                                                                        }}
-                                                                    >
-                                                                        From: {formatValue(from)}
-                                                                    </div>
-                                                                    <div style={{ color: "#9f9" }}>
-                                                                        To: {formatValue(to)}
-                                                                    </div>
-                                                                </div>
-                                                            </li>
-                                                        )
-                                                    )}
-                                                </ul>
-                                            )}
-                                        </div>
+                                        <span style={{ marginRight: 6, color: "#7fd" }}>
+                                            #{entry.renderNumber}
+                                        </span>
+                                        <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                                        <span style={{ marginLeft: 12, color: "#8fd" }}>
+                                            {Object.keys(entry.propChanges).length > 0 && "📝 Props "}
+                                            {Object.keys(entry.hookChanges).length > 0 && "🎣 Hooks "}
+                                            {Object.keys(entry.propChanges).length === 0 &&
+                                                Object.keys(entry.hookChanges).length === 0 && (
+                                                    <span style={{ color: "#aaa" }}>No changes</span>
+                                                )}
+                                        </span>
+                                        <span style={{ flex: 1 }} />
+                                        <span style={{ fontSize: 18, color: "#fff6", marginRight: 2 }}>
+                                            {isExpanded ? "▼" : "►"}
+                                        </span>
                                     </div>
-                                )}
-                            </div>
-                        );
-                    })}
+                                    {isExpanded && (
+                                        <div
+                                            style={{
+                                                padding: "10px 12px",
+                                                background: "#202038",
+                                                fontSize: 14,
+                                            }}
+                                        >
+                                            {/* Prop changes */}
+                                            <div>
+                                                <strong>Prop Changes:</strong>
+                                                {Object.keys(entry.propChanges).length === 0 ? (
+                                                    <div style={{ color: "#888" }}>None</div>
+                                                ) : (
+                                                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                                        {Object.entries(entry.propChanges).map(
+                                                            ([key, { from, to }]) => (
+                                                                <li
+                                                                    key={key}
+                                                                    style={{ marginBottom: "8px" }}
+                                                                >
+                                                                    <span style={{ color: "#ffd080" }}>
+                                                                        {key}:
+                                                                    </span>
+                                                                    <div style={{ marginTop: "4px" }}>
+                                                                        <div
+                                                                            style={{
+                                                                                color: "#f99",
+                                                                                marginBottom: "4px",
+                                                                            }}
+                                                                        >
+                                                                            From: {formatValue(from)}
+                                                                        </div>
+                                                                        <div style={{ color: "#9f9" }}>
+                                                                            To: {formatValue(to)}
+                                                                        </div>
+                                                                    </div>
+                                                                </li>
+                                                            )
+                                                        )}
+                                                    </ul>
+                                                )}
+                                            </div>
+                                            {/* Hook changes */}
+                                            <div style={{ marginTop: 8 }}>
+                                                <strong>Hook Dependency Changes:</strong>
+                                                {Object.keys(entry.hookChanges).length === 0 ? (
+                                                    <div style={{ color: "#888" }}>None</div>
+                                                ) : (
+                                                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                                        {Object.entries(entry.hookChanges).map(
+                                                            ([key, { from, to }]) => (
+                                                                <li
+                                                                    key={key}
+                                                                    style={{ marginBottom: "8px" }}
+                                                                >
+                                                                    <span style={{ color: "#80d9ff" }}>
+                                                                        {key}:
+                                                                    </span>
+                                                                    <div style={{ marginTop: "4px" }}>
+                                                                        <div
+                                                                            style={{
+                                                                                color: "#f99",
+                                                                                marginBottom: "4px",
+                                                                            }}
+                                                                        >
+                                                                            From: {formatValue(from)}
+                                                                        </div>
+                                                                        <div style={{ color: "#9f9" }}>
+                                                                            To: {formatValue(to)}
+                                                                        </div>
+                                                                    </div>
+                                                                </li>
+                                                            )
+                                                        )}
+                                                    </ul>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
                 </div>
             )}
 
-            {/* Resize handles */}
-            {/* Bottom-right corner resize handle */}
+            {/* Resize handles — only bottom, right, and bottom-right corner */}
+            {/* Fix #3: Bottom-right corner uses nwse-resize (correct diagonal direction) */}
             <div
                 style={{
                     position: "absolute",
                     bottom: 0,
                     right: 0,
-                    width: 12,
-                    height: 12,
-                    cursor: "nw-resize",
-                    background: "linear-gradient(-45deg, transparent 30%, #666 30%, #666 70%, transparent 70%)",
+                    width: 14,
+                    height: 14,
+                    cursor: "nwse-resize",
+                    background: "linear-gradient(135deg, transparent 40%, #666 40%, #666 60%, transparent 60%)",
                     zIndex: 1,
                 }}
                 onMouseDown={startResize("bottom-right")}
@@ -461,7 +585,7 @@ export const AdvancedRenderTrackerOverlay = ({
                     position: "absolute",
                     top: 20,
                     right: 0,
-                    bottom: 12,
+                    bottom: 14,
                     width: 4,
                     cursor: "ew-resize",
                     background: "transparent",
@@ -477,7 +601,7 @@ export const AdvancedRenderTrackerOverlay = ({
                     position: "absolute",
                     bottom: 0,
                     left: 20,
-                    right: 12,
+                    right: 14,
                     height: 4,
                     cursor: "ns-resize",
                     background: "transparent",
@@ -488,16 +612,4 @@ export const AdvancedRenderTrackerOverlay = ({
             />
         </div>
     );
-};
-
-const buttonStyle: React.CSSProperties = {
-    background: "#282850",
-    color: "#aef",
-    border: "1px solid #40407a",
-    borderRadius: 5,
-    padding: "4px 10px",
-    fontWeight: 600,
-    fontSize: 13,
-    cursor: "pointer",
-    marginRight: 3,
 };

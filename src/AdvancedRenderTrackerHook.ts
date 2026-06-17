@@ -1,10 +1,16 @@
 import { useRef, useEffect } from "react";
+import { useOptionalRenderTrackerDispatch } from "./RenderTrackerContext";
 
 // Enhanced deep equal utility with circular reference protection
 const deepEqual = (a: any, b: any, visited = new WeakMap()): boolean => {
     if (Object.is(a, b)) return true;
     if (typeof a !== typeof b) return false;
     if (typeof a !== "object" || a == null || b == null) return false;
+
+    // Handle React elements — they are objects with $$typeof
+    if (a.$$typeof) {
+        return a === b;
+    }
 
     // Check for circular references
     if (visited.has(a)) {
@@ -17,11 +23,6 @@ const deepEqual = (a: any, b: any, visited = new WeakMap()): boolean => {
         return a.every((el, idx) => deepEqual(el, b[idx], visited));
     }
 
-    // Handle React elements and functions more gracefully
-    if (a.$$typeof || typeof a === "function") {
-        return a === b;
-    }
-
     const aKeys = Object.keys(a);
     const bKeys = Object.keys(b);
     if (aKeys.length !== bKeys.length) return false;
@@ -32,12 +33,26 @@ const deepEqual = (a: any, b: any, visited = new WeakMap()): boolean => {
 type PropsType = Record<string, any>;
 type HookDependencies = Record<string, any>;
 
-interface RenderTrackerOptions {
+export interface RenderRecord {
+    renderNumber: number;
+    timestamp: number;
+    propChanges: Record<string, { from: any; to: any }>;
+    hookChanges: Record<string, { from: any; to: any }>;
+}
+
+export interface RenderTrackerOptions {
     logToConsole?: boolean;
     trackHooks?: boolean;
     deepCompare?: boolean;
     maxHistory?: number;
 }
+
+let renderTrackerIdCounter = 0;
+
+const createRenderTrackerId = (name: string) => {
+    renderTrackerIdCounter += 1;
+    return `${name}-${renderTrackerIdCounter}`;
+};
 
 /**
  * Custom hook to track component re-renders with detailed prop and hook dependency changes.
@@ -50,34 +65,49 @@ export const useAdvancedRenderTracker = (
     name: string,
     props: PropsType,
     hookDependencies: HookDependencies = {},
-    options: RenderTrackerOptions = {
-        logToConsole: true,
-        trackHooks: true,
-        deepCompare: false,
-        maxHistory: 10,
-    }
+    // Fix #10: Remove redundant outer default object — destructured defaults are sufficient
+    options: RenderTrackerOptions = {}
 ) => {
     const {
         logToConsole = true,
         trackHooks = true,
-        deepCompare = false,
-        maxHistory = 10,
+        // Fix #7: Align defaults with documentation (deepCompare: true, maxHistory: 50)
+        deepCompare = true,
+        maxHistory = 50,
     } = options;
 
-    const renderCount = useRef(0);
+    // Fix #1: Increment synchronously during render so the returned value is never stale.
+    // Using a ref (not state) avoids triggering a re-render loop — refs update without
+    // scheduling a new render, so the count reflects the current render immediately.
+    const renderCountRef = useRef(0);
+    renderCountRef.current += 1;
+    const currentRender = renderCountRef.current;
+    const trackerIdRef = useRef<string>();
+    if (!trackerIdRef.current) {
+        trackerIdRef.current = createRenderTrackerId(name);
+    }
+
     const prevProps = useRef<PropsType>(props);
     const prevHookDeps = useRef<HookDependencies>(hookDependencies);
-    const renderHistory = useRef<
-        Array<{
-            renderNumber: number;
-            timestamp: number;
-            propChanges: Record<string, { from: any; to: any }>;
-            hookChanges: Record<string, { from: any; to: any }>;
-        }>
-    >([]);
+    const renderHistory = useRef<RenderRecord[]>([]);
+    const renderTracker = useOptionalRenderTrackerDispatch();
 
     useEffect(() => {
-        renderCount.current += 1;
+        if (!renderTracker || !trackerIdRef.current) {
+            return;
+        }
+
+        const trackerId = trackerIdRef.current;
+
+        return () => {
+            renderTracker.unregisterComponent(trackerId);
+        };
+    }, [renderTracker]);
+
+    // This effect intentionally has no dependency array so it runs after every render,
+    // which is exactly what we need to capture every re-render regardless of cause.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => {
         const timestamp = Date.now();
 
         const compareFn = deepCompare
@@ -95,9 +125,13 @@ export const useAdvancedRenderTracker = (
               }
             : (a: any, b: any) => a === b;
 
-        // Track prop changes
+        // Fix #2: Merge keys from both previous and current props to detect removed props
+        const allPropKeys = new Set([
+            ...Object.keys(prevProps.current),
+            ...Object.keys(props),
+        ]);
         const propChanges: Record<string, { from: any; to: any }> = {};
-        Object.keys(props).forEach((key) => {
+        allPropKeys.forEach((key) => {
             if (!compareFn(prevProps.current[key], props[key])) {
                 propChanges[key] = {
                     from: prevProps.current[key],
@@ -106,10 +140,14 @@ export const useAdvancedRenderTracker = (
             }
         });
 
-        // Track hook dependency changes
+        // Track hook dependency changes — also detect removed dependencies
         const hookChanges: Record<string, { from: any; to: any }> = {};
         if (trackHooks) {
-            Object.keys(hookDependencies).forEach((key) => {
+            const allHookKeys = new Set([
+                ...Object.keys(prevHookDeps.current),
+                ...Object.keys(hookDependencies),
+            ]);
+            allHookKeys.forEach((key) => {
                 if (!compareFn(prevHookDeps.current[key], hookDependencies[key])) {
                     hookChanges[key] = {
                         from: prevHookDeps.current[key],
@@ -121,7 +159,7 @@ export const useAdvancedRenderTracker = (
 
         // Store render history
         renderHistory.current.push({
-            renderNumber: renderCount.current,
+            renderNumber: currentRender,
             timestamp,
             propChanges,
             hookChanges,
@@ -129,12 +167,12 @@ export const useAdvancedRenderTracker = (
 
         // Keep only last N renders to avoid memory leaks
         if (renderHistory.current.length > maxHistory) {
-            renderHistory.current = renderHistory.current.slice(-maxHistory);
+            renderHistory.current.splice(0, renderHistory.current.length - maxHistory);
         }
 
         // Console logging
-        if (logToConsole && renderCount.current > 1) {
-            console.group(`🔄 ${name} re-render #${renderCount.current}`);
+        if (logToConsole && currentRender > 1) {
+            console.group(`🔄 ${name} re-render #${currentRender}`);
 
             if (Object.keys(propChanges).length > 0) {
                 console.log("📝 Props that changed:", propChanges);
@@ -155,13 +193,23 @@ export const useAdvancedRenderTracker = (
             console.log(`🚀 ${name} initial render`);
         }
 
+        if (renderTracker && trackerIdRef.current) {
+            renderTracker.recordComponent({
+                id: trackerIdRef.current,
+                name,
+                renderCount: currentRender,
+                history: renderHistory.current,
+                updatedAt: timestamp,
+            });
+        }
+
         // Update refs
         prevProps.current = props;
         prevHookDeps.current = hookDependencies;
     });
 
     return {
-        renderCount: renderCount.current,
+        renderCount: renderCountRef.current,
         renderHistory: renderHistory.current,
         getCurrentChanges: () => {
             const latest = renderHistory.current[renderHistory.current.length - 1];
