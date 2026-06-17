@@ -46,16 +46,16 @@ const safeStringify = (obj: any, maxDepth = 3, currentDepth = 0): string => {
             return `[Function: ${value.name || "anonymous"}]`;
         }
 
-        // Handle nested objects beyond max depth by recursing with incremented depth
-        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        // Handle nested objects/arrays beyond max depth by recursing with incremented depth
+        if (typeof value === "object" && value !== null) {
             if (currentDepth >= maxDepth) {
-                return "[Complex Object]";
+                return Array.isArray(value) ? "[Array]" : "[Complex Object]";
             }
-            // Recurse with incremented depth for nested objects
+            // Recurse with incremented depth for nested objects/arrays
             try {
                 return JSON.parse(safeStringify(value, maxDepth, currentDepth + 1));
             } catch {
-                return "[Complex Object]";
+                return Array.isArray(value) ? "[Array]" : "[Complex Object]";
             }
         }
 
