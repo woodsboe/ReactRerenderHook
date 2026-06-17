@@ -48,6 +48,13 @@ export interface RenderTrackerOptions {
     slowRenderThresholdMs?: number;
 }
 
+let renderTrackerIdCounter = 0;
+
+const createRenderTrackerId = (name: string) => {
+    renderTrackerIdCounter += 1;
+    return `${name}-${renderTrackerIdCounter}`;
+};
+
 /**
  * Custom hook to track component re-renders with detailed prop and hook dependency changes.
  * @param {string} name - Name of the component for logging purposes.
@@ -79,6 +86,7 @@ export const useAdvancedRenderTracker = (
     const prevProps = useRef<PropsType>(props);
     const prevHookDeps = useRef<HookDependencies>(hookDependencies);
     const renderHistory = useRef<RenderRecord[]>([]);
+    const renderTracker = useOptionalRenderTrackerDispatch();
 
     // Use layout effect to capture duration as close to the render commit as possible
     useLayoutEffect(() => {
@@ -175,6 +183,16 @@ export const useAdvancedRenderTracker = (
             console.groupEnd();
         } else if (logToConsole) {
             console.log(`🚀 ${name} initial render (${durationMs.toFixed(2)}ms)`);
+        }
+
+        if (renderTracker && trackerIdRef.current) {
+            renderTracker.recordComponent({
+                id: trackerIdRef.current,
+                name,
+                renderCount: currentRender,
+                history: renderHistory.current,
+                updatedAt: timestamp,
+            });
         }
 
         // Update refs
