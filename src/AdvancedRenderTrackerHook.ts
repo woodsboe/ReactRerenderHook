@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect } from "react";
+import { useRef, useLayoutEffect } from "react";
 
 // Enhanced deep equal utility with circular reference protection
 const deepEqual = (a: any, b: any, visited = new WeakMap()): boolean => {
