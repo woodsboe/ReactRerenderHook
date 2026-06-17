@@ -1,6 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { RenderRecord } from "./AdvancedRenderTrackerHook";
-import { useOptionalRenderTrackerContext } from "./RenderTrackerContext";
+import React, { useRef, useState, useEffect } from "react";
+import { RenderRecord } from "./AdvancedRenderTrackerHook";
 
 // Fix #14: Move buttonStyle above component so constants precede their consumers
 const buttonStyle: React.CSSProperties = {
@@ -47,16 +46,16 @@ const safeStringify = (obj: any, maxDepth = 3, currentDepth = 0): string => {
             return `[Function: ${value.name || "anonymous"}]`;
         }
 
-        // Handle nested objects beyond max depth by recursing with incremented depth
-        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        // Handle nested objects/arrays beyond max depth by recursing with incremented depth
+        if (typeof value === "object" && value !== null) {
             if (currentDepth >= maxDepth) {
-                return "[Complex Object]";
+                return Array.isArray(value) ? "[Array]" : "[Complex Object]";
             }
-            // Recurse with incremented depth for nested objects
+            // Recurse with incremented depth for nested objects/arrays
             try {
                 return JSON.parse(safeStringify(value, maxDepth, currentDepth + 1));
             } catch {
-                return "[Complex Object]";
+                return Array.isArray(value) ? "[Array]" : "[Complex Object]";
             }
         }
 
@@ -212,7 +211,13 @@ export const AdvancedRenderTrackerOverlay = ({
     history,
     name = "Component",
     onClose,
-}: AdvancedRenderTrackerOverlayProps) => {
+    slowRenderThresholdMs = 16.67,
+}: {
+    history: RenderRecord[];
+    name?: string;
+    onClose?: () => void;
+    slowRenderThresholdMs?: number;
+}) => {
     const { nodeRef, pos, onMouseDown } = useDraggable();
     const { size, startResize, resizing } = useResizable();
     const [collapsed, setCollapsed] = useState(false);
@@ -422,12 +427,21 @@ export const AdvancedRenderTrackerOverlay = ({
                     {activeComponent && activeHistory.length === 0 && (
                         <div style={{ color: "#888", padding: 16 }}>No renders tracked yet.</div>
                     )}
-
-                    {activeComponent &&
-                        activeHistory.map((entry, index) => {
-                            const rowKey = `${activeComponent.id}-${entry.renderNumber}`;
-                            const isExpanded = expandedRows[rowKey] || false;
-                            return (
+                    {history.map((entry, index) => {
+                        const isExpanded = expandedRows[entry.renderNumber] || false;
+                        const isSlow = entry.durationMs > slowRenderThresholdMs;
+                        return (
+                            <div
+                                key={`${entry.renderNumber}-${index}`}
+                                style={{
+                                    marginBottom: 10,
+                                    background: isSlow ? "#4a2020" : "#232341",
+                                    borderRadius: 8,
+                                    boxShadow: "0 1px 3px #0004",
+                                    overflow: "hidden",
+                                    border: isSlow ? "1px solid #ff4d4d" : "1px solid transparent",
+                                }}
+                            >
                                 <div
                                     key={`${rowKey}-${index}`}
                                     style={{
@@ -438,14 +452,33 @@ export const AdvancedRenderTrackerOverlay = ({
                                         overflow: "hidden",
                                     }}
                                 >
+                                    <span style={{ marginRight: 6, color: isSlow ? "#ff4d4d" : "#7fd" }}>
+                                        #{entry.renderNumber}
+                                    </span>
+                                    <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                                    <span style={{ marginLeft: 12, color: isSlow ? "#ffaa00" : "#8fd" }}>
+                                        {entry.durationMs.toFixed(2)}ms
+                                        {isSlow && " ⚠️"}
+                                    </span>
+                                    <span style={{ marginLeft: 12, color: "#8fd", fontSize: 12 }}>
+                                        {Object.keys(entry.propChanges).length > 0 && "📝 Props "}
+                                        {Object.keys(entry.hookChanges).length > 0 && "🎣 Hooks "}
+                                        {Object.keys(entry.propChanges).length === 0 &&
+                                            Object.keys(entry.hookChanges).length === 0 && (
+                                                <span style={{ color: "#aaa" }}>No changes</span>
+                                            )}
+                                    </span>
+                                    <span style={{ flex: 1 }} />
+                                    <span style={{ fontSize: 18, color: "#fff6", marginRight: 2 }}>
+                                        {isExpanded ? "▼" : "►"}
+                                    </span>
+                                </div>
+                                {isExpanded && (
                                     <div
                                         style={{
-                                            display: "flex",
-                                            alignItems: "center",
-                                            cursor: "pointer",
-                                            padding: "8px 10px",
-                                            borderBottom: isExpanded ? "1px solid #2a2a48" : undefined,
-                                            fontWeight: 500,
+                                            padding: "10px 12px",
+                                            background: isSlow ? "#3a1a1a" : "#202038",
+                                            fontSize: 14,
                                         }}
                                         onClick={() => toggleRow(rowKey)}
                                         onKeyDown={(e) => {

@@ -43,7 +43,7 @@ Options:
 - `trackHooks` — track hook dependency changes (default: `true`)
 - `deepCompare` — use deep equality for change detection (default: `true`)
 - `maxHistory` — max render records to retain (default: `50`)
-
+- `slowRenderThresholdMs` — duration (ms) above which renders are flagged as slow (default: `16.67`)
 ```tsx
 function MyComponent({ value, label }: Props) {
   const { renderCount, renderHistory } = useAdvancedRenderTracker(
