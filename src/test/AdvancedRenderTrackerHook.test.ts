@@ -427,7 +427,7 @@ describe("useAdvancedRenderTracker — performance tracking", () => {
     });
 
     it("identifies slow renders in console log", () => {
-        const groupSpy = vi.spyOn(console, "group");
+        const groupSpy = vi.mocked(console.group);
         
         // Reset performance.now mock to control it precisely
         let time = 1000;
