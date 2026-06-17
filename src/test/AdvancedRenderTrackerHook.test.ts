@@ -392,3 +392,72 @@ describe("useAdvancedRenderTracker — default options", () => {
         expect(result.current.renderHistory.length).toBeGreaterThan(10);
     });
 });
+
+describe("useAdvancedRenderTracker — performance tracking", () => {
+    beforeEach(() => {
+        vi.spyOn(console, "log").mockImplementation(() => {});
+        vi.spyOn(console, "group").mockImplementation(() => {});
+        vi.spyOn(console, "groupEnd").mockImplementation(() => {});
+        vi.spyOn(console, "table").mockImplementation(() => {});
+        
+        // Mock performance.now() to control duration
+        let time = 1000;
+        vi.spyOn(performance, "now").mockImplementation(() => {
+            const current = time;
+            time += 10; // Increment by 10ms for each call
+            return current;
+        });
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("captures durationMs on every record", () => {
+        const { result, rerender } = renderHook(() =>
+            useAdvancedRenderTracker("Test", {}, {}, { logToConsole: false })
+        );
+        
+        expect(result.current.renderHistory[0]).toHaveProperty("durationMs");
+        expect(result.current.renderHistory[0].durationMs).toBeGreaterThanOrEqual(0);
+
+        rerender();
+        expect(result.current.renderHistory[1]).toHaveProperty("durationMs");
+        expect(result.current.renderHistory[1].durationMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("identifies slow renders in console log", () => {
+        const groupSpy = vi.spyOn(console, "group");
+        
+        // Reset performance.now mock to control it precisely
+        let time = 1000;
+        vi.spyOn(performance, "now").mockImplementation(() => {
+            const current = time;
+            // The hook calls performance.now() twice: once at start, once in useLayoutEffect
+            return current;
+        });
+
+        const { rerender } = renderHook(({ threshold }) =>
+            useAdvancedRenderTracker("Test", {}, {}, { logToConsole: true, slowRenderThresholdMs: threshold }),
+            { initialProps: { threshold: 5 } }
+        );
+
+        // First render (initial render doesn't use console.group for re-render info)
+        
+        // Second render: trigger a slow one
+        time = 1000;
+        // startTime = 1000
+        // in useLayoutEffect, performance.now() = 1010 -> duration = 10
+        vi.spyOn(performance, "now").mockImplementation(() => {
+            const current = time;
+            time += 10;
+            return current;
+        });
+        
+        rerender({ threshold: 5 });
+
+        // Check if the last group call includes the SLOW warning
+        const lastCall = groupSpy.mock.calls[groupSpy.mock.calls.length - 1][0];
+        expect(lastCall).toContain("⚠️ SLOW");
+    });
+});

@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
+import { RenderRecord } from "./AdvancedRenderTrackerHook";
 
 // Fix #14: Move buttonStyle above component so constants precede their consumers
 const buttonStyle: React.CSSProperties = {
@@ -197,15 +198,12 @@ export const AdvancedRenderTrackerOverlay = ({
     history,
     name = "Component",
     onClose,
+    slowRenderThresholdMs = 16.67,
 }: {
-    history: Array<{
-        renderNumber: number;
-        timestamp: number;
-        propChanges: Record<string, { from: any; to: any }>;
-        hookChanges: Record<string, { from: any; to: any }>;
-    }>;
+    history: RenderRecord[];
     name?: string;
     onClose?: () => void;
+    slowRenderThresholdMs?: number;
 }) => {
     const { nodeRef, pos, onMouseDown } = useDraggable();
     const { size, startResize, resizing } = useResizable();
@@ -327,15 +325,17 @@ export const AdvancedRenderTrackerOverlay = ({
                     )}
                     {history.map((entry, index) => {
                         const isExpanded = expandedRows[entry.renderNumber] || false;
+                        const isSlow = entry.durationMs > slowRenderThresholdMs;
                         return (
                             <div
                                 key={`${entry.renderNumber}-${index}`}
                                 style={{
                                     marginBottom: 10,
-                                    background: "#232341",
+                                    background: isSlow ? "#4a2020" : "#232341",
                                     borderRadius: 8,
                                     boxShadow: "0 1px 3px #0004",
                                     overflow: "hidden",
+                                    border: isSlow ? "1px solid #ff4d4d" : "1px solid transparent",
                                 }}
                             >
                                 <div
@@ -359,11 +359,15 @@ export const AdvancedRenderTrackerOverlay = ({
                                     aria-expanded={isExpanded}
                                     title="Expand/collapse details"
                                 >
-                                    <span style={{ marginRight: 6, color: "#7fd" }}>
+                                    <span style={{ marginRight: 6, color: isSlow ? "#ff4d4d" : "#7fd" }}>
                                         #{entry.renderNumber}
                                     </span>
                                     <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
-                                    <span style={{ marginLeft: 12, color: "#8fd" }}>
+                                    <span style={{ marginLeft: 12, color: isSlow ? "#ffaa00" : "#8fd" }}>
+                                        {entry.durationMs.toFixed(2)}ms
+                                        {isSlow && " ⚠️"}
+                                    </span>
+                                    <span style={{ marginLeft: 12, color: "#8fd", fontSize: 12 }}>
                                         {Object.keys(entry.propChanges).length > 0 && "📝 Props "}
                                         {Object.keys(entry.hookChanges).length > 0 && "🎣 Hooks "}
                                         {Object.keys(entry.propChanges).length === 0 &&
@@ -380,7 +384,7 @@ export const AdvancedRenderTrackerOverlay = ({
                                     <div
                                         style={{
                                             padding: "10px 12px",
-                                            background: "#202038",
+                                            background: isSlow ? "#3a1a1a" : "#202038",
                                             fontSize: 14,
                                         }}
                                     >
