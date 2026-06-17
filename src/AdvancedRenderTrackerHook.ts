@@ -73,12 +73,8 @@ export const useAdvancedRenderTracker = (
 
     const startTime = performance.now();
 
-    // Fix #1: Increment synchronously during render so the returned value is never stale.
-    // Using a ref (not state) avoids triggering a re-render loop — refs update without
-    // scheduling a new render, so the count reflects the current render immediately.
     const renderCountRef = useRef(0);
-    renderCountRef.current += 1;
-    const currentRender = renderCountRef.current;
+    const currentRender = renderCountRef.current + 1;
 
     const prevProps = useRef<PropsType>(props);
     const prevHookDeps = useRef<HookDependencies>(hookDependencies);
@@ -86,6 +82,7 @@ export const useAdvancedRenderTracker = (
 
     // Use layout effect to capture duration as close to the render commit as possible
     useLayoutEffect(() => {
+        renderCountRef.current = currentRender;
         const durationMs = performance.now() - startTime;
         const timestamp = Date.now();
 
@@ -186,7 +183,7 @@ export const useAdvancedRenderTracker = (
     });
 
     return {
-        renderCount: renderCountRef.current,
+        renderCount: currentRender,
         renderHistory: renderHistory.current,
         getCurrentChanges: () => {
             const latest = renderHistory.current[renderHistory.current.length - 1];
