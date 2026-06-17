@@ -431,7 +431,7 @@ describe("useAdvancedRenderTracker — performance tracking", () => {
         
         // Reset performance.now mock to control it precisely
         let time = 1000;
-        vi.spyOn(performance, "now").mockImplementation(() => {
+        vi.mocked(performance.now).mockImplementation(() => {
             const current = time;
             // The hook calls performance.now() twice: once at start, once in useLayoutEffect
             return current;
